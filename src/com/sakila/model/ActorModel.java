@@ -4,31 +4,27 @@ import com.sakila.data.Actor;
 import com.sakila.orm.DataContext;
 import com.sakila.orm.iDatapost;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
 
 public class ActorModel extends DataContext implements iDatapost<Actor> {
 
-    private List<Actor> cache = new ArrayList<>();
-
-    private Actor mapRow(ResultSet rs) throws SQLException {
-        int id = rs.getInt("actor_id");
-        String first = rs.getString("first_name");
-        String last = rs.getString("last_name");
-        rs.getTimestamp("last_update");
-        return new Actor(id, first, last);
-    }
-
     @Override
     public boolean insert(Actor entity) {
         String sql = "INSERT INTO actor (first_name, last_name, last_update) VALUES (?, ?, NOW())";
-        try {
-            int rows = executeUpdate(sql, entity.getFirstName(), entity.getLastName());
-            return rows == 1;
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, entity.getFirstName());
+            stmt.setString(2, entity.getLastName());
+
+            int rows = stmt.executeUpdate();
+            setLastMessage("Actor creado. Filas afectadas: " + rows);
+            return rows > 0;
+
         } catch (SQLException e) {
-            lastMessage = e.getMessage();
+            setLastMessage("Error al crear actor: " + e.getMessage());
             return false;
         }
     }
@@ -36,14 +32,19 @@ public class ActorModel extends DataContext implements iDatapost<Actor> {
     @Override
     public boolean update(Actor entity) {
         String sql = "UPDATE actor SET first_name = ?, last_name = ?, last_update = NOW() WHERE actor_id = ?";
-        try {
-            int rows = executeUpdate(sql,
-                    entity.getFirstName(),
-                    entity.getLastName(),
-                    entity.getActorId());
-            return rows == 1;
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, entity.getFirstName());
+            stmt.setString(2, entity.getLastName());
+            stmt.setInt(3, entity.getActorId());
+
+            int rows = stmt.executeUpdate();
+            setLastMessage("Actor actualizado. Filas afectadas: " + rows);
+            return rows > 0; // Si es 0, no actualizó nada (quizás ID incorrecto)
+
         } catch (SQLException e) {
-            lastMessage = e.getMessage();
+            setLastMessage("Error al actualizar actor: " + e.getMessage());
             return false;
         }
     }
@@ -51,11 +52,16 @@ public class ActorModel extends DataContext implements iDatapost<Actor> {
     @Override
     public boolean delete(int id) {
         String sql = "DELETE FROM actor WHERE actor_id = ?";
-        try {
-            int rows = executeUpdate(sql, id);
-            return rows == 1;
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setInt(1, id);
+            int rows = stmt.executeUpdate();
+            setLastMessage("Actor eliminado. Filas afectadas: " + rows);
+            return rows > 0;
+
         } catch (SQLException e) {
-            lastMessage = e.getMessage();
+            setLastMessage("Error al eliminar actor (Posible FK): " + e.getMessage());
             return false;
         }
     }
@@ -63,54 +69,80 @@ public class ActorModel extends DataContext implements iDatapost<Actor> {
     @Override
     public Actor getById(int id) {
         String sql = "SELECT actor_id, first_name, last_name, last_update FROM actor WHERE actor_id = ?";
-        try (ResultSet rs = executeQuery(sql, id)) {
-            if (rs.next()) {
-                return mapRow(rs);
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setInt(1, id);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return mapRow(rs);
+                }
             }
+            setLastMessage("Actor no encontrado.");
+            return null;
+
         } catch (SQLException e) {
-            lastMessage = e.getMessage();
+            setLastMessage("Error al buscar actor: " + e.getMessage());
+            return null;
         }
-        return null;
     }
 
     @Override
     public List<Actor> getAll() {
-        cache = new ArrayList<>();
-        String sql = "SELECT actor_id, first_name, last_name, last_update FROM actor ORDER BY actor_id";
-        try (ResultSet rs = executeQuery(sql)) {
+        String sql = "SELECT actor_id, first_name, last_name, last_update FROM actor ORDER BY actor_id LIMIT 500"; // Limitamos a 500 por seguridad visual
+        List<Actor> lista = new ArrayList<>();
+
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+
             while (rs.next()) {
-                cache.add(mapRow(rs));
+                lista.add(mapRow(rs));
             }
+            setLastMessage("Actores cargados: " + lista.size());
+            return lista;
+
         } catch (SQLException e) {
-            lastMessage = e.getMessage();
+            setLastMessage("Error al listar actores: " + e.getMessage());
+            return lista;
         }
-        return cache;
     }
 
     @Override
     public List<Actor> search(String text) {
-        cache = new ArrayList<>();
-        String pattern = "%" + text.trim() + "%";
+        String sql = "SELECT actor_id, first_name, last_name, last_update FROM actor " +
+                "WHERE first_name LIKE ? OR last_name LIKE ? ORDER BY actor_id";
+        List<Actor> lista = new ArrayList<>();
+        String pattern = "%" + text + "%";
 
-        String sql = "SELECT actor_id, first_name, last_name, last_update " +
-                "FROM actor " +
-                "WHERE first_name LIKE ? " +
-                "   OR last_name LIKE ? " +
-                "ORDER BY actor_id";
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-        try (ResultSet rs = executeQuery(sql, pattern, pattern)) {
-            while (rs.next()) {
-                cache.add(mapRow(rs));
+            stmt.setString(1, pattern);
+            stmt.setString(2, pattern);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    lista.add(mapRow(rs));
+                }
             }
+            setLastMessage("Búsqueda completada. Resultados: " + lista.size());
+            return lista;
+
         } catch (SQLException e) {
-            lastMessage = e.getMessage();
-            System.out.println("Error en búsqueda de actores: " + lastMessage);
+            setLastMessage("Error en búsqueda: " + e.getMessage());
+            return lista;
         }
-        return cache;
     }
 
-    @Override
-    public String getLastMessage() {
-        return "";
+    // Método auxiliar privado para mapear el ResultSet a Objeto
+    private Actor mapRow(ResultSet rs) throws SQLException {
+        return new Actor(
+                rs.getInt("actor_id"),
+                rs.getString("first_name"),
+                rs.getString("last_name"),
+                rs.getTimestamp("last_update")
+        );
     }
 }
