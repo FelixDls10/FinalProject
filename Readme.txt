@@ -26,7 +26,7 @@ Categorías: Administración del catálogo de géneros.
 
 Configuración Externa: Credenciales de base de datos desacopladas mediante properties file.
 
-🛠️ Tecnologías Utilizadas
+Tecnologías Utilizadas
 Lenguaje: Java (JDK 17+)
 
 Base de Datos: MySQL (Esquema sakila)
